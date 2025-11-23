@@ -8,7 +8,7 @@ import {
   Upload, CloudLightning, FileText, CheckCircle, AlertTriangle, X, Database, Wifi, RefreshCw, LogOut, Play, Square, Bell, Wrench, UserPlus, Users, Shield
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Global Firebase References ---
@@ -34,7 +34,7 @@ const generateWorkOrderData = () => {
   }));
 };
 
-const generateDowntimeData = () => Array.from({ length: 10 }, (_, i) => ({ hour: `${String(i).padStart(2, '0')}:00`, minutes: Math.floor(Math.random() * 15) }));
+const generateDowntimeData = () => Array.from({ length: 10 }, (_, i) => ({ hour: `0${i}:00`, minutes: Math.floor(Math.random() * 15) }));
 const generateErrorTypeData = () => [
   { name: 'Mechanical', value: 400, color: '#ef4444' },
   { name: 'Electrical', value: 300, color: '#f59e0b' },
@@ -120,6 +120,7 @@ const LoginScreen = ({ onLogin, error }) => {
   const [brandIndex, setBrandIndex] = useState(0);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -131,83 +132,155 @@ const LoginScreen = ({ onLogin, error }) => {
   const currentBrand = BRANDS[brandIndex];
 
   return (
-    <div className="relative h-screen w-full bg-black overflow-hidden flex items-center justify-center font-sans">
+    <div className="relative h-screen w-full bg-gray-900 overflow-hidden flex items-center justify-center font-sans perspective-1000">
       
-      {/* Background Conveyor Simulation */}
-      <div className="absolute inset-0 opacity-30 blur-md pointer-events-none flex flex-col gap-20 -rotate-12 scale-110">
-         {Array.from({length: 10}).map((_, i) => (
-           <div key={i} className="h-32 w-[200%] bg-gray-800 relative -left-1/2 flex items-center justify-around gap-4 animate-[slideRight_10s_linear_infinite]">
-             {Array.from({length: 20}).map((_, j) => (
-               <div key={j} className="w-24 h-24 bg-gray-700 rounded shadow-2xl"></div>
-             ))}
-           </div>
-         ))}
-      </div>
+      {/* --- 1. The Actual Picture (Environment) --- */}
+      <div 
+        className="absolute inset-0 z-0 bg-cover bg-center"
+        style={{
+          // High-res factory background from Unsplash
+          backgroundImage: 'url("https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=2670&auto=format&fit=crop")',
+          filter: 'brightness(0.6) blur(2px)',
+          transform: 'scale(1.1)' // Slight zoom to hide blurred edges
+        }}
+      ></div>
 
-      {/* Floating Blurred Boxes (Foreground Ambience) */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-32 h-32 bg-gray-800 rounded shadow-lg blur-lg opacity-50 animate-pulse"></div>
-        <div className="absolute bottom-1/3 right-1/4 w-40 h-40 bg-gray-800 rounded shadow-lg blur-xl opacity-60 animate-bounce"></div>
-      </div>
-
-      {/* Main Focus Container */}
-      <div className="z-10 flex flex-col items-center gap-8">
+      {/* --- 2. The Realistic Conveyor System (CSS) --- */}
+      {/* This sits ON TOP of the background image to provide a "track" for the box */}
+      <div className="absolute inset-x-0 bottom-0 h-1/2 z-10 flex flex-col items-center justify-end perspective-1000 pointer-events-none">
         
-        {/* The Animated Box */}
+        {/* The Belt Surface */}
         <div 
-          className="relative w-64 h-64 rounded-xl shadow-2xl flex flex-col items-center justify-center transition-all duration-1000 ease-in-out transform hover:scale-105"
-          style={{ 
-            backgroundColor: currentBrand.color,
-            color: currentBrand.text,
-            boxShadow: `0 0 50px ${currentBrand.color}40`
+          className="w-full h-64 relative"
+          style={{
+            background: 'linear-gradient(180deg, #1f2937 0%, #374151 20%, #111827 100%)',
+            transform: 'rotateX(60deg) scale(1.5)',
+            boxShadow: '0 -20px 50px rgba(0,0,0,0.8)'
           }}
         >
-          {/* "Tape" on box */}
-          <div className="absolute top-0 w-full h-full border-t-4 border-b-4 border-black/10 pointer-events-none"></div>
-          <div className="absolute left-1/2 -translate-x-1/2 w-16 h-full bg-black/5"></div>
-
-          <div className="z-10 text-center transition-opacity duration-500">
-            <h1 className="text-4xl font-black tracking-tighter mb-2">{currentBrand.name}</h1>
-            <p className="text-xs font-bold uppercase tracking-widest opacity-80">{currentBrand.desc}</p>
-          </div>
+          {/* Moving Roller Texture */}
+          <div className="absolute inset-0 opacity-30" 
+            style={{
+              backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 40px, #000 40px, #000 42px)',
+              animation: 'rollBelt 1s linear infinite'
+            }}
+          ></div>
+          
+          {/* Side Rails */}
+          <div className="absolute left-0 top-0 bottom-0 w-8 bg-yellow-500/80 border-r border-yellow-600"></div>
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-yellow-500/80 border-l border-yellow-600"></div>
         </div>
-
-        {/* Login Form */}
-        <div className="bg-black/80 backdrop-blur-md border border-gray-800 p-8 rounded-2xl shadow-2xl w-80">
-          <h2 className="text-white font-bold text-xl mb-6 text-center">System Access</h2>
-          {error && <div className="mb-4 p-2 bg-red-500/20 border border-red-500/50 rounded text-red-200 text-xs text-center">{error}</div>}
-          <div className="space-y-4">
-            <div>
-              <label className="text-gray-400 text-xs font-bold uppercase">Username</label>
-              <input 
-                type="text" 
-                className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-white outline-none transition-colors mt-1"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="text-gray-400 text-xs font-bold uppercase">Password</label>
-              <input 
-                type="password" 
-                className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white focus:border-white outline-none transition-colors mt-1"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <button 
-              onClick={() => onLogin(username, password)}
-              className="w-full bg-white text-black font-bold py-2 rounded hover:bg-gray-200 transition-colors mt-2"
-            >
-              Login
-            </button>
-          </div>
-          <div className="mt-6 text-center">
-            <p className="text-[10px] text-gray-600">TTI AUTOMATION &copy; 2025</p>
-          </div>
-        </div>
-
+        
+        {/* Animation Keyframes */}
+        <style>{`
+          @keyframes rollBelt {
+            from { background-position: 0 0; }
+            to { background-position: 0 42px; }
+          }
+        `}</style>
       </div>
+
+      {/* --- 3. The Interactive Box (Part of the picture) --- */}
+      {!showLogin && (
+        <div 
+          onClick={() => setShowLogin(true)}
+          className="relative z-20 cursor-pointer group animate-in fade-in duration-1000"
+          style={{ 
+            marginBottom: '-80px', // Sink it into the "belt" visual
+            transform: 'scale(0.8) translateY(50px)' 
+          }} 
+        >
+          <div 
+            className="w-80 h-72 relative rounded-sm flex flex-col items-center justify-center transition-all duration-500 ease-in-out transform group-hover:scale-105 group-hover:-translate-y-4"
+            style={{ 
+              backgroundColor: currentBrand.color,
+              color: currentBrand.text,
+              // Realistic box shadowing and lighting
+              boxShadow: '0 20px 40px rgba(0,0,0,0.6), inset 0 2px 10px rgba(255,255,255,0.2), inset 0 -10px 30px rgba(0,0,0,0.2)',
+              border: '1px solid rgba(255,255,255,0.1)'
+            }}
+          >
+            {/* Box Flaps/Tape visual */}
+            <div className="absolute top-0 w-full h-full border-t-2 border-black/10 pointer-events-none"></div>
+            <div className="absolute left-1/2 -translate-x-1/2 w-16 h-full bg-black/5 mix-blend-multiply"></div>
+            
+            {/* Content */}
+            <div className="z-10 text-center p-6">
+              <h1 className="text-6xl font-black tracking-tighter mb-1 drop-shadow-md">{currentBrand.name}</h1>
+              <p className="text-xs font-bold uppercase tracking-[0.3em] opacity-70">{currentBrand.desc}</p>
+            </div>
+
+            {/* Reflection on the "floor" */}
+            <div 
+              className="absolute -bottom-16 left-0 right-0 h-16 w-full opacity-30 blur-sm transform scale-y-[-1]"
+              style={{ 
+                backgroundColor: currentBrand.color,
+                maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0))',
+                WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0))'
+              }}
+            ></div>
+
+            {/* Click Hint */}
+            <div className="absolute -top-12 bg-white/90 text-black px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg animate-bounce">
+              System Entry
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- 4. Login Form Overlay (Unchanged logic) --- */}
+      {showLogin && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in zoom-in duration-300">
+          <div className="relative bg-gray-900 border border-gray-700 p-8 rounded-2xl shadow-2xl w-96">
+            <button onClick={() => setShowLogin(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"><X size={20} /></button>
+            
+            <div className="flex flex-col items-center mb-6">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mb-3 shadow-lg shadow-blue-900/50">
+                <Box className="text-white" size={24} />
+              </div>
+              <h2 className="text-white font-bold text-xl">System Access</h2>
+              <p className="text-gray-400 text-xs mt-1">TTI Automation Secure Portal</p>
+            </div>
+
+            {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded text-red-400 text-xs text-center flex items-center gap-2 justify-center"><AlertTriangle size={12}/> {error}</div>}
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">Username</label>
+                <div className="relative mt-1">
+                  <input 
+                    type="text" 
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 pl-10 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="Enter ID"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                  />
+                  <Users className="absolute left-3 top-3.5 text-gray-500" size={16} />
+                </div>
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">Password</label>
+                <div className="relative mt-1">
+                  <input 
+                    type="password" 
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 pl-10 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <Lock className="absolute left-3 top-3.5 text-gray-500" size={16} />
+                </div>
+              </div>
+              <button 
+                onClick={() => onLogin(username, password)}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-all shadow-lg shadow-blue-900/20 mt-4"
+              >
+                Authenticate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -378,29 +451,9 @@ export default function IndustrialApp() {
     setLayoutItems(prev => prev.map(item => item.id === id ? { ...item, data: { ...item.data, status: item.data.status === 'running' ? 'stopped' : 'running' } } : item));
     setUnsavedChanges(true);
   };
-  const handleMouseDown = (e, id) => {
-    if (currentUser?.role !== 'developer') return;
-    e.stopPropagation();
-    const item = layoutItems.find(x => x.id === id);
-    if (!item) return;
-    setSelectedItemId(id);
-    setIsDragging(true);
-    setDragOffset({ x: e.clientX - item.x, y: e.clientY - item.y });
-  };
-
-  const handleCanvasMouseMove = (e) => {
-    if (!isDragging || !selectedItemId || currentUser?.role !== 'developer') return;
-    if (!dragOffset) return;
-    const nx = e.clientX - dragOffset.x;
-    const ny = e.clientY - dragOffset.y;
-    setLayoutItems(prev => prev.map(i => i.id === selectedItemId ? { ...i, x: nx, y: ny } : i));
-    setUnsavedChanges(true);
-  };
-
-  const handleCanvasMouseUp = () => {
-    setIsDragging(false);
-    setDragOffset({ x: 0, y: 0 });
-  };
+  const handleMouseDown = (e, id) => { if (currentUser?.role === 'developer') { e.stopPropagation(); setSelectedItemId(id); setIsDragging(true); const i = layoutItems.find(x=>x.id===id); setDragOffset({x: e.clientX-i.x, y:e.clientY-i.y}); }};
+  const handleCanvasMouseMove = (e) => { if (isDragging && selectedItemId && currentUser?.role === 'developer') { const nx = e.clientX-dragOffset.x; const ny = e.clientY-dragOffset.y; setLayoutItems(prev => prev.map(i => i.id===selectedItemId ? {...i, x:nx, y:ny} : i)); setUnsavedChanges(true); }};
+  const handleCanvasMouseUp = () => setIsDragging(false);
   const handleRotate = (id) => { if(currentUser?.role === 'developer') { setLayoutItems(prev => prev.map(i => i.id===id ? {...i, rotation:(i.rotation+90)%360} : i)); setUnsavedChanges(true); }};
   const handleDelete = (id) => { if(currentUser?.role === 'developer') { setLayoutItems(prev => prev.filter(i => i.id!==id)); setSelectedItemId(null); setUnsavedChanges(true); }};
   const handleInfoClick = (item) => { setEditingItem({...item}); setIsModalOpen(true); };
