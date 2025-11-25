@@ -406,6 +406,13 @@ export default function IndustrialApp() {
     } catch (e) { alert("Invalid JSON"); }
   };
 
+  const handleClearConfig = () => {
+    localStorage.removeItem('tti_firebase_config');
+    setFirebaseConfigStr('');
+    setDbConnected(false);
+    alert("Firebase config cleared.");
+  };
+
   // Mock Data Loop
   useEffect(() => {
     const initialRobotData = {};
