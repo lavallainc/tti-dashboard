@@ -1,122 +1,320 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, RadialBarChart, RadialBar, AreaChart, Area
 } from 'recharts';
 import { 
-  Layout, Activity, Settings, Info, Save, Trash2, 
-  RotateCw, Factory, Zap, Box, ArrowRight, Lock, 
-  Upload, CloudLightning, FileText, CheckCircle, AlertTriangle, X, Database, Wifi, RefreshCw, LogOut, Play, Square, Bell, Wrench, UserPlus, Users, Shield
+  Layout, Activity, Settings, Info, Save, Trash2, Edit3, Plus, Minus,
+  RotateCw, Factory, Zap, Box, ArrowRight, Lock, Unlock,
+  Upload, CloudLightning, FileText, CheckCircle, AlertTriangle, X, Database, Wifi, RefreshCw, LogOut, Play, Square, Bell, Wrench, UserPlus, Users, Shield,
+  Camera, Map, ChevronDown, Folder, Paperclip, Package, AlertOctagon, CornerUpLeft, MessageSquare, Clock, Mail, Circle, Palette, Hash, Cpu, Rss, Settings2, UserMinus, Search, Eye
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { 
+    getAuth, 
+    GoogleAuthProvider, 
+    signInWithPopup, 
+    onAuthStateChanged, 
+    signOut 
+} from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, updateDoc, deleteDoc } from 'firebase/firestore';
 
 // --- Global Firebase References ---
 let app;
 let auth;
 let db;
+const FIREBASE_CONFIG_STORAGE_KEY = 'tti_dashboard_firebase_config';
 
 // --- Constants & Brands ---
 const BRANDS = [
-  { name: 'RYOBI', color: '#DAF600', text: '#000000', desc: 'Power Tools' }, // Ryobi Green
-  { name: 'RIDGID', color: '#E24E1B', text: '#FFFFFF', desc: 'Professional' }, // Rigid Orange
-  { name: 'HART', color: '#005EB8', text: '#FFFFFF', desc: 'Do It With Hart' }, // Hart Blue
-  { name: 'HOOVER', color: '#AA0000', text: '#FFFFFF', desc: 'Floor Care' }, // Hoover Red
+  { name: 'TTI', color: '#1B64F5', text: '#FFFFFF', desc: 'Automation Systems' },
+  { name: 'RYOBI', color: '#DAF600', text: '#000000', desc: 'Power Tools' },
+  { name: 'RIDGID', color: '#E24E1B', text: '#FFFFFF', desc: 'Professional' },
+  { name: 'HART', color: '#005EB8', text: '#FFFFFF', desc: 'Do It With Hart' },
+  { name: 'HOOVER', color: '#AA0000', text: '#FFFFFF', desc: 'Floor Care' },
 ];
+const AVAILABLE_CHART_TYPES = ['LineChart', 'BarChart', 'AreaChart', 'PieChart', 'RadialGauge'];
 
-// --- Mock Data Generators ---
+// --- MOCK DATA GENERATORS (Moved to Top for Reference Access) ---
+
 const generateWorkOrderData = () => {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return days.map(day => ({
-    name: day,
-    completed: Math.floor(Math.random() * 50) + 120,
-    target: 150
-  }));
+  return days.map(day => ({ name: day, completed: Math.floor(Math.random() * 50) + 120, target: 150 }));
 };
-
 const generateDowntimeData = () => Array.from({ length: 10 }, (_, i) => ({ hour: `0${i}:00`, minutes: Math.floor(Math.random() * 15) }));
-const generateErrorTypeData = () => [
-  { name: 'Mechanical', value: 400, color: '#ef4444' },
-  { name: 'Electrical', value: 300, color: '#f59e0b' },
-  { name: 'Software', value: 300, color: '#3b82f6' },
-  { name: 'Sensor', value: 200, color: '#10b981' },
-];
-const generateRobotList = () => {
-  const robots = [];
-  for (let i = 23; i <= 43; i++) robots.push(i);
-  for (let i = 48; i <= 67; i++) robots.push(i);
-  return robots;
-};
-const MOCK_ROBOT_ERRORS = [
-  { code: "E-404", desc: "Motor Sync Failure", time: "10:23 AM" },
-  { code: "E-201", desc: "Lidar Obstruction", time: "09:15 AM" },
-  { code: "W-105", desc: "Battery Voltage Low", time: "08:45 AM" },
-  { code: "E-332", desc: "Pathing Timeout", time: "04:20 AM" },
-];
-const MOCK_ALERTS = [
-  { id: 1, type: 'critical', msg: 'Conveyor 04 Jammed', time: 'Just now' },
-  { id: 2, type: 'warning', msg: 'Robot 23 High Temp', time: '2m ago' },
-  { id: 3, type: 'info', msg: 'Shift Change Completed', time: '15m ago' },
+const generateErrorTypeData = () => [{ name: 'Mechanical', value: 400, color: '#ef4444' }, { name: 'Electrical', value: 300, color: '#f59e0b' }, { name: 'Software', value: 300, color: '#3b82f6' }, { name: 'Sensor', value: 200, color: '#10b981' }];
+const generateRobotList = () => { const robots = []; for (let i = 23; i <= 43; i++) robots.push(i); for (let i = 48; i <= 67; i++) robots.push(i); return robots; };
+const ROBOT_IDS = generateRobotList();
+
+// Mock Asset List
+const MOCK_ASSETS = [
+    { id: 'A001', name: 'Wellford Conveyor 1', model: 'CVR-1000', serial: 'WLF-C1001', type: 'conveyor', location: 'Zone 1', data: { parts: [], image: null, notes: '' } },
+    { id: 'A002', name: 'TPC Palletizer 2', model: 'PLT-500', serial: 'TPC-P0502', type: 'robot', location: 'Shipping', data: { parts: [], image: null, notes: '' } },
+    { id: 'A003', name: 'EDC AGV Fleet Base', model: 'AGV-BASE', serial: 'EDC-B001', type: 'other', location: 'Dock 4', data: { parts: [], image: null, notes: '' } },
+    { id: 'A004', name: 'Prime Robot #55', model: 'ROB-550', serial: 'PR-R055', type: 'robot', location: 'Cell 5', data: { parts: [], image: null, notes: '' } },
+    { id: 'A005', name: 'Wellford Drive Motor', model: 'MOT-IND-L', serial: 'WLF-M345', type: 'motor', location: 'Zone 1', data: { parts: [], image: null, notes: '' } },
 ];
 
-// --- Components ---
+// --- UI COMPONENTS ---
 
-const Modal = ({ isOpen, onClose, title, children }) => {
+const Modal = React.memo(({ isOpen, onClose, title, children, size = 'md' }) => {
   if (!isOpen) return null;
+  const widthClass = size === 'lg' ? 'max-w-4xl' : size === 'sm' ? 'max-w-md' : 'max-w-xl';
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-full max-w-lg p-6 relative max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className={`bg-white rounded-xl shadow-2xl w-full ${widthClass} p-6 relative max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200`}>
         <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800"><X size={20}/></button>
         <h3 className="text-xl font-bold text-gray-800 mb-4 pr-8">{title}</h3>
         {children}
+        <div className="h-6"></div> {/* Spacer */}
       </div>
     </div>
   );
-};
+});
 
-const RadialGauge = ({ value, label, color, subLabel, size = 120, onClick }) => {
+const RadialGauge = React.memo(({ value, label, color, subLabel, size = 120, onClick }) => {
   const radius = size / 2 - 10;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (value / 100) * circumference;
+  
+  const strokeColor = color || '#1B64F5';
+
   return (
     <div className={`flex flex-col items-center justify-center relative ${onClick ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`} onClick={onClick}>
       <svg width={size} height={size} className="transform -rotate-90">
         <circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth="8" fill="transparent" />
-        <circle cx={size / 2} cy={size / 2} r={radius} stroke={color} strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke={strokeColor} strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000 ease-out" />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"><span className="text-xl font-bold text-gray-800">{value}%</span></div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-xl font-bold text-gray-800">{value}%</span>
+      </div>
       <span className="mt-2 text-xs font-bold text-gray-500 uppercase tracking-wide text-center">{label}</span>
       {subLabel && <span className="text-[10px] text-gray-400">{subLabel}</span>}
     </div>
   );
-};
+});
 
-const HmiComponent = ({ item, isSelected, isEditable, onMouseDown, onRotate, onInfo, onDelete, onToggleRun }) => {
-  const isRunning = item.data?.status === 'running';
-  const style = { transform: `translate(${item.x}px, ${item.y}px) rotate(${item.rotation}deg)`, position: 'absolute', cursor: isEditable ? (isSelected ? 'grabbing' : 'grab') : 'pointer', transition: isEditable ? 'none' : 'transform 0.3s ease' };
-  const renderIcon = () => {
-    const color = isSelected ? "#2563eb" : (isRunning ? "#10b981" : "#475569"); 
-    const fill = isSelected ? "#eff6ff" : (isRunning ? "#ecfdf5" : "#f8fafc");
-    switch (item.type) {
-      case 'conveyor-straight': return (<svg width="60" height="20" viewBox="0 0 60 20" fill="none" stroke={color} strokeWidth="2"><rect x="0" y="0" width="60" height="20" rx="2" fill={fill} /><path d="M5 0V20 M15 0V20 M25 0V20 M35 0V20 M45 0V20 M55 0V20" opacity="0.3" className={isRunning ? 'animate-pulse' : ''} />{isRunning && <path d="M0 10 L60 10" stroke={color} strokeDasharray="4 2" className="animate-[dash_1s_linear_infinite]" />}{!isRunning && <path d="M20 10H40M35 5L40 10L35 15" stroke={color} strokeWidth="2" />}</svg>);
-      case 'conveyor-curve': return (<svg width="60" height="60" viewBox="0 0 60 60" fill="none" stroke={color} strokeWidth="2"><path d="M0 20H20C31.0457 20 40 28.9543 40 40V60" stroke={color} fill="none" strokeWidth="20" opacity="0.1"/><path d="M0 10H20C36.5685 10 50 23.4315 50 40V60" /><path d="M0 30H20C25.5228 30 30 34.4772 30 40V60" /></svg>);
-      case 'motor': return (<div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center shadow-sm ${isRunning ? 'bg-green-50 border-green-500' : 'bg-white border-slate-600'}`}><Zap size={24} className={isRunning ? "text-green-500 animate-spin-slow" : "text-slate-500"} fill={isRunning ? "currentColor" : "none"} /></div>);
-      case 'sensor': return (<div className="w-8 h-8 bg-white rotate-45 border-2 flex items-center justify-center shadow-sm" style={{borderColor: color}}><div className={`w-2 h-2 rounded-full ${isRunning ? 'bg-green-500 animate-ping' : 'bg-red-500'}`}></div></div>);
-      case 'junction': return (<div className="w-14 h-14 bg-white border-2 flex items-center justify-center shadow-sm" style={{borderColor: color}}><ArrowRight size={24} color={color} /></div>);
-      default: return <div className="w-10 h-10 bg-red-500">?</div>;
-    }
-  };
+const ErrorCodeModal = React.memo(({ isOpen, onClose, robotId }) => {
+  const MOCK_ROBOT_ERRORS = useMemo(() => [
+    { code: "E-404", desc: "Motor Sync Failure", time: "10:23 AM" }, 
+    { code: "E-201", desc: "Lidar Obstruction", time: "09:15 AM" }
+  ], []);
+
   return (
-    <div style={style} className={`group select-none ${isSelected ? 'z-50' : 'z-10'}`} onMouseDown={(e) => isEditable && onMouseDown(e, item.id)} onDoubleClick={() => isEditable && onRotate(item.id)} onClick={(e) => { if(!isEditable && onToggleRun) onToggleRun(item.id); if(isEditable) onInfo(item); }}>
-      {renderIcon()}
-      {isSelected && isEditable && (<div className="absolute -top-10 left-1/2 -translate-x-1/2 flex gap-1 bg-white p-1 rounded shadow-xl border border-gray-200 z-50"><button onClick={(e) => { e.stopPropagation(); onInfo(item); }} className="p-1 hover:bg-gray-100 rounded text-blue-600"><Info size={14} /></button><button onClick={(e) => { e.stopPropagation(); onRotate(item.id); }} className="p-1 hover:bg-gray-100 rounded text-emerald-600"><RotateCw size={14} /></button><button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} className="p-1 hover:bg-gray-100 rounded text-red-600"><Trash2 size={14} /></button></div>)}
-      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap text-gray-500 bg-white/80 backdrop-blur px-1.5 py-0.5 rounded shadow-sm border border-gray-100">{item.data.name || item.type}</div>
-    </div>
+    <Modal isOpen={isOpen} onClose={onClose} title={`Robot ${robotId} Error History`} size="md">
+        <p className="text-sm text-gray-600 mb-4">Displaying recent critical fault codes for immediate action.</p>
+        <div className="space-y-3">
+            {MOCK_ROBOT_ERRORS.map((err, index) => (
+                <div key={index} className="flex items-center p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <AlertOctagon className="text-red-600 mr-3" size={20} />
+                    <div>
+                        <p className="font-bold text-sm text-gray-800">{err.code}: {err.desc}</p>
+                        <p className="text-xs text-gray-500 flex items-center gap-1"><Clock size={10} /> {err.time}</p>
+                    </div>
+                </div>
+            ))}
+            <div className="p-3 bg-gray-100 text-gray-600 text-sm rounded-lg text-center">
+              No further critical errors reported since last maintenance.
+            </div>
+        </div>
+    </Modal>
   );
-};
+});
 
-// --- LOGIN SCREEN COMPONENT ---
-const LoginScreen = ({ onLogin, error }) => {
+const ChartEditModal = React.memo(({ isOpen, onClose, editingChart, onSave, AVAILABLE_CHART_TYPES }) => {
+    const [tempChart, setTempChart] = useState(editingChart);
+
+    useEffect(() => {
+        setTempChart(editingChart);
+    }, [editingChart]);
+    
+    if (!tempChart) return null;
+
+    const handleSave = () => {
+        if (!tempChart.title || !tempChart.type) {
+            alert("Title and Type are required.");
+            return;
+        }
+        onSave(tempChart);
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={`Edit Chart: ${tempChart.title}`} size="sm">
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Chart Title</label>
+                    <input type="text" className="w-full border rounded p-2" value={tempChart.title} onChange={(e) => setTempChart({...tempChart, title: e.target.value})} />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Chart Type</label>
+                    <select className="w-full border rounded p-2" value={tempChart.type} onChange={(e) => setTempChart({...tempChart, type: e.target.value})}>
+                        {AVAILABLE_CHART_TYPES.map(type => <option key={type} value={type}>{type.replace(/([A-Z])/g, ' $1').trim()}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Data Source (Key)</label>
+                    <input type="text" disabled={true} className="w-full border bg-gray-100 rounded p-2 text-gray-500" value={tempChart.dataKey} />
+                    <p className="text-xs text-gray-500 mt-1">Data Key is fixed based on initial chart type.</p>
+                </div>
+                <div className="flex justify-end pt-4 border-t">
+                    <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save Chart</button>
+                </div>
+            </div>
+        </Modal>
+    );
+});
+
+const AssetCardModal = React.memo(({ isOpen, onClose, asset, onSave, isDev }) => {
+    const [tempAsset, setTempAsset] = useState(asset);
+    const [newPart, setNewPart] = useState({ name: '', model: '', picture: '', notes: '' });
+
+    useEffect(() => {
+        setTempAsset(asset);
+    }, [asset]);
+
+    if (!asset) return null;
+    
+    const handleSave = () => {
+        onSave(tempAsset);
+        onClose();
+    };
+
+    const handleAddPart = () => {
+        if (!newPart.name || !newPart.model) return alert("Part Name and Model are required.");
+        setTempAsset(prev => ({
+            ...prev,
+            data: {
+                ...prev.data,
+                parts: [...(prev.data.parts || []), { ...newPart, id: Date.now() }]
+            }
+        }));
+        setNewPart({ name: '', model: '', picture: '', notes: '' });
+    };
+
+    const handleDeletePart = (id) => {
+        setTempAsset(prev => ({
+            ...prev,
+            data: {
+                ...prev.data,
+                parts: prev.data.parts.filter(p => p.id !== id)
+            }
+        }));
+    };
+    
+    const handleImageUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setTempAsset(prev => ({ ...prev, data: { ...prev.data, image: reader.result } }));
+          };
+          reader.readAsDataURL(file);
+        }
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title={`Asset Details: ${asset.name}`} size="lg">
+            <div className="flex flex-col lg:flex-row gap-6">
+                
+                {/* Left Column: Image & Main Info */}
+                <div className="lg:w-1/3 space-y-4">
+                    <div className="relative w-full aspect-square bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden group">
+                        {tempAsset.data?.image ? (
+                            <img src={tempAsset.data.image} alt="Asset" className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="text-center text-gray-400"><Camera size={48} className="mx-auto mb-2"/><span>No Image</span></div>
+                        )}
+                        {isDev && (
+                            <label className="absolute inset-0 bg-black/50 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition-opacity">
+                                <Upload size={24} className="mr-2" /> Upload Photo
+                                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={!isDev} />
+                            </label>
+                        )}
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-gray-500 uppercase">Model</label>
+                        <input type="text" disabled={!isDev} className="w-full border rounded p-2 text-sm" value={tempAsset.model} onChange={(e) => setTempAsset(p => ({...p, model: e.target.value}))} />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-gray-500 uppercase">Serial Number</label>
+                        <input type="text" disabled={!isDev} className="w-full border rounded p-2 text-sm" value={tempAsset.serial} onChange={(e) => setTempAsset(p => ({...p, serial: e.target.value}))} />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs font-bold text-gray-500 uppercase">QR Code / Location</label>
+                        <div className="flex items-center gap-2">
+                            <Hash size={16} className="text-gray-400"/>
+                            <span className="text-sm font-mono text-gray-700">{tempAsset.id}</span>
+                            <Map size={16} className="text-gray-400 ml-auto"/>
+                            <span className="text-sm font-semibold text-gray-700">{tempAsset.location}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right Column: Parts and Files */}
+                <div className="lg:w-2/3 space-y-6">
+                    
+                    {/* Parts Section */}
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h4 className="font-bold text-lg text-gray-700 flex items-center gap-2 mb-3"><Wrench size={20}/> Spare Parts Inventory</h4>
+                        
+                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                            {tempAsset.data?.parts?.length > 0 ? (
+                                tempAsset.data.parts.map(part => (
+                                    <div key={part.id} className="bg-white border border-gray-200 p-3 rounded shadow-sm flex justify-between items-center group">
+                                        <div className="flex items-center gap-3">
+                                            <Package size={18} className="text-blue-500"/>
+                                            <div>
+                                                <div className="font-bold text-sm text-gray-800">{part.name}</div>
+                                                <div className="text-xs text-gray-500">Model: {part.model}</div>
+                                                {part.notes && <div className="text-xs text-red-500 italic">{part.notes}</div>}
+                                            </div>
+                                        </div>
+                                        {isDev && <button onClick={() => handleDeletePart(part.id)} className="text-red-400 hover:text-red-600 p-1 rounded"><Trash2 size={16}/></button>}
+                                    </div>
+                                ))
+                            ) : <div className="text-sm text-gray-400 italic text-center py-4">No critical spare parts added.</div>}
+                        </div>
+
+                        {/* Add Part Form (Dev Only) */}
+                        {isDev && (
+                            <div className="mt-4 pt-3 border-t border-gray-200 space-y-2">
+                                <h5 className="text-sm font-semibold text-gray-700 mb-1">Add New Part:</h5>
+                                <input type="text" placeholder="Part Name (e.g., Conveyor Belt)" className="w-full text-sm border p-2 rounded" value={newPart.name} onChange={e => setNewPart({...newPart, name: e.target.value})} />
+                                <input type="text" placeholder="Part Model/SKU" className="w-full text-sm border p-2 rounded" value={newPart.model} onChange={e => setNewPart({...newPart, model: e.target.value})} />
+                                <textarea placeholder="Notes/Location in Parts Cage" className="w-full text-sm border p-2 rounded h-16" value={newPart.notes} onChange={e => setNewPart({...newPart, notes: e.target.value})} />
+                                <button onClick={handleAddPart} className="w-full bg-green-600 text-white py-2 rounded text-sm flex items-center justify-center gap-2 hover:bg-green-700">
+                                    <Plus size={16}/> Add Part to BOM
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Files Section (Placeholder for future functionality) */}
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h4 className="font-bold text-lg text-gray-700 flex items-center gap-2 mb-3"><Folder size={20}/> Attached Documentation</h4>
+                        <div className="text-sm text-gray-500 italic">
+                            PDF manuals, schematics, and work instructions will be managed here.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="mt-6 pt-4 border-t flex justify-end gap-3">
+                <button onClick={onClose} className="px-4 py-2 text-gray-500 hover:text-gray-800 rounded-lg">Close</button>
+                {isDev && (
+                    <button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 flex items-center gap-2">
+                        <Save size={16}/> Save Asset Changes
+                    </button>
+                )}
+            </div>
+        </Modal>
+    );
+});
+
+// --- LOGIN COMPONENT (Moved above App to fix ReferenceError) ---
+
+const LoginScreen = React.memo(({ onLogin, error }) => {
   const [brandIndex, setBrandIndex] = useState(0);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -130,107 +328,95 @@ const LoginScreen = ({ onLogin, error }) => {
   }, []);
 
   const currentBrand = BRANDS[brandIndex];
+  
+  // Public URL for the latest image provided
+  const backgroundImageUrl = 'http://googleusercontent.com/image_generation_content/0'; // Public URL of the generated conveyor image
 
   return (
-    <div className="relative h-screen w-full bg-gray-900 overflow-hidden flex items-center justify-center font-sans perspective-1000">
+    <div className="relative h-screen w-full bg-black overflow-hidden flex items-center justify-center font-sans perspective-1000">
       
-      {/* --- 1. The Actual Picture (Environment) --- */}
+      {/* --- Background Image (Public URL for reliability) --- */}
       <div 
-        className="absolute inset-0 z-0 bg-cover bg-center"
-        style={{
-          // High-res factory background from Unsplash
-          backgroundImage: 'url("https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?q=80&w=2670&auto=format&fit=crop")',
-          filter: 'brightness(0.6) blur(2px)',
-          transform: 'scale(1.1)' // Slight zoom to hide blurred edges
+        className="absolute inset-0 z-0 bg-cover" 
+        style={{ 
+          backgroundImage: `url('${backgroundImageUrl}')`, 
+          backgroundColor: 'black', // Fallback color
+          backgroundPosition: 'center', 
+          backgroundRepeat: 'no-repeat', 
+          filter: 'brightness(0.3) contrast(1.1)', 
+          backgroundSize: 'cover',
         }}
       ></div>
 
-      {/* --- 2. The Realistic Conveyor System (CSS) --- */}
-      {/* This sits ON TOP of the background image to provide a "track" for the box */}
-      <div className="absolute inset-x-0 bottom-0 h-1/2 z-10 flex flex-col items-center justify-end perspective-1000 pointer-events-none">
-        
-        {/* The Belt Surface */}
-        <div 
-          className="w-full h-64 relative"
-          style={{
-            background: 'linear-gradient(180deg, #1f2937 0%, #374151 20%, #111827 100%)',
-            transform: 'rotateX(60deg) scale(1.5)',
-            boxShadow: '0 -20px 50px rgba(0,0,0,0.8)'
-          }}
-        >
-          {/* Moving Roller Texture */}
-          <div className="absolute inset-0 opacity-30" 
-            style={{
-              backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 40px, #000 40px, #000 42px)',
-              animation: 'rollBelt 1s linear infinite'
-            }}
-          ></div>
-          
-          {/* Side Rails */}
-          <div className="absolute left-0 top-0 bottom-0 w-8 bg-yellow-500/80 border-r border-yellow-600"></div>
-          <div className="absolute right-0 top-0 bottom-0 w-8 bg-yellow-500/80 border-l border-yellow-600"></div>
-        </div>
-        
-        {/* Animation Keyframes */}
-        <style>{`
-          @keyframes rollBelt {
-            from { background-position: 0 0; }
-            to { background-position: 0 42px; }
-          }
-        `}</style>
-      </div>
-
-      {/* --- 3. The Interactive Box (Part of the picture) --- */}
+      {/* --- 2. Interactive Entry: 3D Brand Box Overlay --- */}
       {!showLogin && (
-        <div 
-          onClick={() => setShowLogin(true)}
-          className="relative z-20 cursor-pointer group animate-in fade-in duration-1000"
-          style={{ 
-            marginBottom: '-80px', // Sink it into the "belt" visual
-            transform: 'scale(0.8) translateY(50px)' 
-          }} 
-        >
+        <div className="z-20 animate-in fade-in duration-1000 flex flex-col items-center perspective-500">
+          
+          {/* Main Box - positioned to overlay the box in the background image */}
           <div 
-            className="w-80 h-72 relative rounded-sm flex flex-col items-center justify-center transition-all duration-500 ease-in-out transform group-hover:scale-105 group-hover:-translate-y-4"
+            onClick={() => setShowLogin(true)}
+            className="absolute cursor-pointer group transition-all duration-500"
             style={{ 
-              backgroundColor: currentBrand.color,
-              color: currentBrand.text,
-              // Realistic box shadowing and lighting
-              boxShadow: '0 20px 40px rgba(0,0,0,0.6), inset 0 2px 10px rgba(255,255,255,0.2), inset 0 -10px 30px rgba(0,0,0,0.2)',
-              border: '1px solid rgba(255,255,255,0.1)'
+              width: '320px',    
+              height: '240px',   
+              top: '55%',        
+              left: '50.5%',       
+              transform: 'translate(-50%, -50%) rotateX(10deg) rotateY(-10deg) rotateZ(0deg)', 
+              transformStyle: 'preserve-3d',
+              boxShadow: `0 0 40px ${currentBrand.color}60`, 
+              borderRadius: '8px'
             }}
           >
-            {/* Box Flaps/Tape visual */}
-            <div className="absolute top-0 w-full h-full border-t-2 border-black/10 pointer-events-none"></div>
-            <div className="absolute left-1/2 -translate-x-1/2 w-16 h-full bg-black/5 mix-blend-multiply"></div>
-            
-            {/* Content */}
-            <div className="z-10 text-center p-6">
-              <h1 className="text-6xl font-black tracking-tighter mb-1 drop-shadow-md">{currentBrand.name}</h1>
-              <p className="text-xs font-bold uppercase tracking-[0.3em] opacity-70">{currentBrand.desc}</p>
-            </div>
-
-            {/* Reflection on the "floor" */}
+            {/* Front Face of the 3D Box */}
             <div 
-              className="absolute -bottom-16 left-0 right-0 h-16 w-full opacity-30 blur-sm transform scale-y-[-1]"
+              className="absolute inset-0 rounded flex flex-col items-center justify-center transition-colors duration-1000 ease-in-out shadow-2xl group-hover:scale-105"
               style={{ 
                 backgroundColor: currentBrand.color,
-                maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0))',
-                WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0))'
+                color: currentBrand.text,
+                transform: 'translateZ(20px)',
+                borderRadius: '8px'
+              }}
+            >
+              <h1 className="text-5xl font-black tracking-tighter z-10">{currentBrand.name}</h1>
+              <p className="text-sm font-bold uppercase tracking-widest mt-2 opacity-80">{currentBrand.desc}</p>
+            </div>
+
+            {/* Top Face of the 3D Box */}
+            <div 
+              className="absolute w-full h-10 bg-black/20"
+              style={{
+                top: '0', left: '0',
+                transform: 'rotateX(90deg) translateY(-20px) translateZ(-20px)', 
+                transformOrigin: 'top left',
+                backgroundColor: `${currentBrand.color}E0`, 
+                borderRadius: '8px 8px 0 0'
+              }}
+            ></div>
+
+            {/* Right Face of the 3D Box */}
+            <div 
+              className="absolute h-full w-10 bg-black/20"
+              style={{
+                top: '0', right: '0',
+                transform: 'rotateY(90deg) translateX(20px) translateZ(-20px)', 
+                transformOrigin: 'top right',
+                backgroundColor: `${currentBrand.color}C0`, 
+                borderRadius: '0 8px 8px 0'
               }}
             ></div>
 
             {/* Click Hint */}
-            <div className="absolute -top-12 bg-white/90 text-black px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide shadow-lg animate-bounce">
-              System Entry
+            <div className="absolute -bottom-16 left-1/2 -translate-x-1/2 bg-white/10 backdrop-blur border border-white/20 text-white px-4 py-2 rounded-full text-xs font-bold animate-bounce cursor-pointer">
+              ENTER SYSTEM
             </div>
           </div>
+
         </div>
       )}
 
-      {/* --- 4. Login Form Overlay (Unchanged logic) --- */}
+      {/* --- 3. Login Form Overlay --- */}
       {showLogin && (
-        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in zoom-in duration-300">
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center animate-in fade-in zoom-in duration-300">
           <div className="relative bg-gray-900 border border-gray-700 p-8 rounded-2xl shadow-2xl w-96">
             <button onClick={() => setShowLogin(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"><X size={20} /></button>
             
@@ -283,402 +469,808 @@ const LoginScreen = ({ onLogin, error }) => {
       )}
     </div>
   );
+});
+
+
+// --- HOOKS ---
+
+const useDashboardData = (buildings, activeBuildingId) => {
+  const activeBuilding = buildings.find(b => b.id === activeBuildingId);
+  const themeColor = activeBuilding ? activeBuilding.color : '#1B64F5';
+
+  const initialChartConfig = useMemo(() => {
+    // Default charts for Wellford
+    const wellfordCharts = [
+      { id: 1, title: 'Wellford Downtime (Min/Hr)', type: 'BarChart', dataKey: 'downtime', w: 6, h: 4 },
+      { id: 2, title: 'Raft Uptime', type: 'RadialGauge', dataKey: 'raft', w: 2, h: 2 },
+      { id: 3, title: 'Conveyor Uptime', type: 'RadialGauge', dataKey: 'conveyor', w: 2, h: 2 },
+      { id: 4, title: 'AutoStore Uptime', type: 'RadialGauge', dataKey: 'autostore', w: 2, h: 2 },
+      { id: 5, title: 'Work Orders Completed', type: 'LineChart', dataKey: 'workorders', w: 8, h: 4 },
+      { id: 6, title: 'Errors by Type', type: 'PieChart', dataKey: 'errors', w: 4, h: 6 },
+    ];
+    
+    // Default charts for TPC
+    const tpcCharts = [
+      { id: 1, title: 'TPC Conveyor Uptime', type: 'RadialGauge', dataKey: 'conveyor', w: 3, h: 3 },
+      { id: 2, title: 'TPC Downtime Minutes', type: 'AreaChart', dataKey: 'downtime', w: 9, h: 4 },
+    ];
+
+    // Default charts for EDC
+    const edcCharts = [
+      { id: 1, title: 'EDC Quicktron AGV Uptime', type: 'RadialGauge', dataKey: 'quicktron', w: 3, h: 3 },
+      { id: 2, title: 'EDC Work Orders', type: 'LineChart', dataKey: 'workorders', w: 9, h: 4 },
+    ];
+
+    // Default charts for Prime Robots (45 gauges)
+    const primeRobotCharts = ROBOT_IDS.map((id, index) => ({
+      id: index + 1,
+      title: `Robot ${id} Uptime`,
+      type: 'RadialGauge',
+      dataKey: `robot${id}`,
+      w: 2, h: 2,
+      isRobot: true,
+      robotId: id
+    }));
+
+    return {
+      'Wellford': wellfordCharts,
+      'The Power Center (TPC)': tpcCharts,
+      'EDC': edcCharts,
+      'Prime Robots': primeRobotCharts,
+    };
+  }, []);
+
+  const [chartConfigs, setChartConfigs] = useState(() => {
+    // Load from local storage or use initial defaults
+    const savedConfig = localStorage.getItem('tti_dashboard_charts');
+    if (savedConfig) {
+      return JSON.parse(savedConfig);
+    }
+    return initialChartConfig;
+  });
+
+  const activeCharts = chartConfigs[activeBuilding?.name] || [];
+
+  // Function to update a single chart's data, position, or type
+  const updateChartConfig = useCallback((id, updates) => {
+    setChartConfigs(prevConfigs => {
+      const currentCharts = prevConfigs[activeBuilding.name] || [];
+      const updatedCharts = currentCharts.map(chart => 
+        chart.id === id ? { ...chart, ...updates } : chart
+      );
+      const newConfigs = { ...prevConfigs, [activeBuilding.name]: updatedCharts };
+      localStorage.setItem('tti_dashboard_charts', JSON.stringify(newConfigs));
+      return newConfigs;
+    });
+  }, [activeBuilding]);
+
+  const deleteChartConfig = useCallback((id) => {
+    setChartConfigs(prevConfigs => {
+      const currentCharts = prevConfigs[activeBuilding.name] || [];
+      const updatedCharts = currentCharts.filter(chart => chart.id !== id);
+      const newConfigs = { ...prevConfigs, [activeBuilding.name]: updatedCharts };
+      localStorage.setItem('tti_dashboard_charts', JSON.stringify(newConfigs));
+      return newConfigs;
+    });
+  }, [activeBuilding]);
+
+  const resetAllCharts = useCallback(() => {
+    setChartConfigs(initialChartConfig);
+    localStorage.removeItem('tti_dashboard_charts');
+  }, [initialChartConfig]);
+
+  // Combined data structure for easy access
+  const dashboardData = useMemo(() => ({
+    downtime: generateDowntimeData(),
+    workorders: generateWorkOrderData(),
+    errors: generateErrorTypeData(),
+    raft: { value: Math.floor(Math.random() * 10) + 90 },
+    conveyor: { value: Math.floor(Math.random() * 10) + 90 },
+    autostore: { value: Math.floor(Math.random() * 10) + 90 },
+    quicktron: { value: Math.floor(Math.random() * 10) + 90 },
+    ...ROBOT_IDS.reduce((acc, id) => {
+        acc[`robot${id}`] = { value: Math.floor(Math.random() * 10) + 90 };
+        return acc;
+    }, {})
+  }), [activeBuildingId]); 
+
+  return { activeCharts, dashboardData, themeColor, updateChartConfig, deleteChartConfig, resetAllCharts };
 };
 
-// --- MAIN APP ---
+const useSettingsManager = () => {
+    const [settings, setSettings] = useState(() => {
+        const savedSettings = localStorage.getItem('tti_dashboard_settings');
+        if (savedSettings) {
+            return JSON.parse(savedSettings);
+        }
+        return {
+            buildings: [
+                { id: 1, name: 'Wellford', color: '#3b82f6' }, // blue
+                { id: 2, name: 'The Power Center (TPC)', color: '#10b981' }, // emerald
+                { id: 3, name: 'EDC', color: '#f59e0b' }, // amber
+                { id: 4, name: 'Prime Robots', color: '#8b5cf6' }, // violet
+            ],
+            users: [
+                { id: 'u1', username: 'dev', password: 'admin', role: 'developer' },
+                { id: 'u2', username: 'operator', password: '1234', role: 'user' },
+            ],
+            firebaseConfig: '',
+            apiEndpoint: 'https://mock-api.com/v1/data',
+        };
+    });
+
+    const saveSettings = useCallback((newSettings) => {
+        setSettings(newSettings);
+        localStorage.setItem('tti_dashboard_settings', JSON.stringify(newSettings));
+    }, []);
+    
+    const addUser = useCallback((user) => {
+        setSettings(prev => {
+            const newSettings = { ...prev, users: [...prev.users, { ...user, id: `u${Date.now()}` }] };
+            localStorage.setItem('tti_dashboard_settings', JSON.stringify(newSettings));
+            return newSettings;
+        });
+    }, []);
+    
+    const deleteUser = useCallback((id) => {
+        setSettings(prev => {
+            const newSettings = { ...prev, users: prev.users.filter(u => u.id !== id) };
+            localStorage.setItem('tti_dashboard_settings', JSON.stringify(newSettings));
+            return newSettings;
+        });
+    }, []);
+
+    return { settings, saveSettings, addUser, deleteUser };
+}
+
+const useAssetManager = () => {
+    const [assets, setAssets] = useState(() => {
+        const savedAssets = localStorage.getItem('tti_asset_list');
+        if (savedAssets) {
+            return JSON.parse(savedAssets);
+        }
+        // Initialize mock assets with default data structure
+        return MOCK_ASSETS.map(asset => ({
+            ...asset,
+            data: asset.data || { parts: [], image: null, notes: '' }
+        }));
+    });
+    
+    const updateAsset = useCallback((updatedAsset) => {
+        setAssets(prev => {
+            const updatedList = prev.map(a => a.id === updatedAsset.id ? updatedAsset : a);
+            localStorage.setItem('tti_asset_list', JSON.stringify(updatedList));
+            return updatedList;
+        });
+    }, []);
+    
+    const getAssetById = useCallback((id) => assets.find(a => a.id === id), [assets]);
+    
+    return { assets, updateAsset, getAssetById };
+};
+
+
+// --- UI LAYOUTS ---
+
+const DashboardLayout = React.memo(({ activeBuilding, activeCharts, dashboardData, themeColor, isEditable, toggleEditMode, updateChartConfig, deleteChartConfig, resetAllCharts, currentUser }) => {
+  const [errorModalOpen, setErrorModalOpen] = useState(false);
+  const [selectedRobotId, setSelectedRobotId] = useState(null);
+  const [chartEditModalOpen, setChartEditModalOpen] = useState(false);
+  const [editingChart, setEditingChart] = useState(null);
+
+  const getChartComponent = useCallback((chart) => {
+    const data = dashboardData[chart.dataKey];
+    const chartColor = themeColor;
+    
+    if (chart.type === 'RadialGauge') {
+        const handleClick = chart.isRobot 
+            ? () => { setSelectedRobotId(chart.robotId); setErrorModalOpen(true); } 
+            : undefined;
+
+        // RadialGauge uses the data.value directly (a single percentage)
+        return (
+            <RadialGauge 
+                value={data.value} 
+                label={chart.title.split(' ').slice(0, 2).join(' ')} 
+                subLabel={chart.title.split(' ').slice(2).join(' ')}
+                color={chartColor} 
+                onClick={handleClick}
+                size={120}
+            />
+        );
+    }
+    
+    // For other charts, render the appropriate Recharts component
+    const ChartComponent = chart.type === 'LineChart' ? LineChart : (chart.type === 'AreaChart' ? AreaChart : BarChart);
+
+    // Dynamic rendering of data lines/bars based on dataKey
+    let renderElement;
+    let dataLabelKey = chart.dataKey === 'downtime' ? 'minutes' : 'completed';
+
+    if (chart.type === 'BarChart') {
+        renderElement = <Bar dataKey={dataLabelKey} fill={chartColor} radius={[4, 4, 0, 0]} />;
+    } else if (chart.type === 'AreaChart') {
+        renderElement = <Area type="monotone" dataKey={dataLabelKey} stroke={chartColor} fill={`url(#colorUv-${chart.id})`} strokeWidth={2} />;
+    } else if (chart.type === 'LineChart') {
+        renderElement = <Line type="monotone" dataKey={dataLabelKey} stroke={chartColor} strokeWidth={3} dot={{ stroke: chartColor, strokeWidth: 2, r: 4 }} activeDot={{ r: 8 }} />;
+    } else if (chart.type === 'PieChart') {
+        return (
+            <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                    <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} fill={chartColor} label>
+                        {data.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={['#ef4444', '#f59e0b', '#3b82f6', '#10b981'][index % 4]} />
+                        ))}
+                    </Pie>
+                    <RechartsTooltip />
+                </PieChart>
+            </ResponsiveContainer>
+        );
+    }
+
+    // Standard Cartesian Charts (Line, Bar, Area)
+    return (
+        <ResponsiveContainer width="100%" height="100%">
+            <ChartComponent data={data} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                <defs>
+                    <linearGradient id={`colorUv-${chart.id}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={chartColor} stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor={chartColor} stopOpacity={0}/>
+                    </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ccc" opacity={0.3} />
+                <XAxis dataKey="name" stroke="#666" fontSize={12} />
+                <YAxis stroke="#666" fontSize={12} />
+                <RechartsTooltip contentStyle={{ backgroundColor: '#2d3748', border: 'none', color: '#fff' }} cursor={{ fill: chartColor, opacity: 0.1 }} />
+                {renderElement}
+            </ChartComponent>
+        </ResponsiveContainer>
+    );
+  }, [dashboardData, themeColor]);
+
+  const handleEditChart = useCallback((chart) => {
+    setEditingChart(chart);
+    setChartEditModalOpen(true);
+  }, []);
+
+  const handleSaveChartEdit = useCallback((updates) => {
+    updateChartConfig(editingChart.id, updates);
+    setChartEditModalOpen(false);
+    setEditingChart(null);
+  }, [editingChart, updateChartConfig]);
+  
+  // Render Charts in a Grid
+  const renderCharts = useMemo(() => activeCharts.map(chart => (
+    <div 
+        key={chart.id} 
+        style={{ gridColumn: `span ${chart.w}`, gridRow: `span ${chart.h}` }}
+        className={`relative bg-white rounded-2xl shadow-xl transition-all duration-300 transform ${isEditable ? 'ring-4 ring-blue-400/50 shadow-blue-500/30' : 'hover:shadow-2xl'}`}
+    >
+      <div 
+        className={`absolute top-0 left-0 right-0 h-8 rounded-t-2xl px-4 flex items-center justify-between ${isEditable ? 'bg-blue-600 cursor-move' : 'bg-gray-100'}`}
+        style={isEditable ? { backgroundColor: themeColor } : {}}
+      >
+        <h4 className={`text-sm font-bold ${isEditable ? 'text-white' : 'text-gray-700'}`}>{chart.title}</h4>
+        {isEditable && (
+          <div className="flex gap-2">
+            <button onClick={() => handleEditChart(chart)} className="text-white hover:text-yellow-300"><Edit3 size={14} /></button>
+            <button onClick={() => deleteChartConfig(chart.id)} className="text-white hover:text-red-300"><Trash2 size={14} /></button>
+          </div>
+        )}
+      </div>
+      <div className={`p-4 pt-10 h-full w-full ${chart.type === 'RadialGauge' ? 'flex items-center justify-center' : ''}`}>
+          {getChartComponent(chart)}
+      </div>
+    </div>
+  )), [activeCharts, isEditable, getChartComponent, handleEditChart, deleteChartConfig, themeColor]);
+
+
+  return (
+    <div className="flex-1 p-6 overflow-y-auto w-full h-full" style={{ backgroundColor: '#f1f5f9' }}>
+      
+      {/* Header and Edit Controls */}
+      <div className="flex justify-between items-center mb-6 sticky top-0 bg-white/90 p-4 rounded-xl shadow-lg z-30">
+        <h3 className="text-2xl font-bold text-gray-800">{activeBuilding.name} Dashboard</h3>
+        {currentUser?.role === 'developer' && (
+          <div className="flex gap-3">
+            <button 
+              onClick={toggleEditMode} 
+              className={`flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-sm transition-all ${isEditable ? 'bg-red-500 text-white shadow-lg' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            >
+              {isEditable ? <Lock size={16}/> : <Edit3 size={16}/>}
+              {isEditable ? 'Exit Edit Mode' : 'Edit Dashboard'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Grid Layout (Fixed 12 Column Grid) */}
+      <div className={`grid gap-6 ${isEditable ? 'grid-cols-12' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-12'}`} style={{ gridAutoRows: 'minmax(150px, auto)' }}>
+        {renderCharts}
+        
+        {/* Placeholder for adding new charts */}
+        {isEditable && (
+          <div style={{ gridColumn: 'span 4', gridRow: 'span 3' }} className="border-4 border-dashed border-gray-300 rounded-2xl flex items-center justify-center bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer" onClick={() => { setEditingChart({ id: Date.now(), title: 'New Chart', type: 'LineChart', dataKey: 'workorders', w: 6, h: 4 }); setChartEditModalOpen(true); }}>
+            <div className="text-center text-gray-500">
+              <Plus size={36} className="mx-auto" />
+              <p className="font-semibold mt-2">Add New Chart</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Robot Error Modal */}
+      <ErrorCodeModal isOpen={errorModalOpen} onClose={() => setErrorModalOpen(false)} robotId={selectedRobotId} />
+      
+      {/* Chart Configuration Modal */}
+      <ChartEditModal 
+        isOpen={chartEditModalOpen} 
+        onClose={() => setChartEditModalOpen(false)} 
+        editingChart={editingChart} 
+        onSave={handleSaveChartEdit} 
+        AVAILABLE_CHART_TYPES={AVAILABLE_CHART_TYPES} 
+      />
+
+    </div>
+  );
+});
+
+const AssetManagerLayout = React.memo(({ assets, updateAsset, isDev }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedAsset, setSelectedAsset] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
+    const filteredAssets = useMemo(() => {
+        if (!searchTerm) return assets;
+        const lowerCaseSearch = searchTerm.toLowerCase();
+        return assets.filter(asset => 
+            asset.name.toLowerCase().includes(lowerCaseSearch) ||
+            asset.model.toLowerCase().includes(lowerCaseSearch) ||
+            asset.serial.toLowerCase().includes(lowerCaseSearch)
+        );
+    }, [assets, searchTerm]);
+
+    const handleOpenAssetCard = useCallback((asset) => {
+        setSelectedAsset(asset);
+        setIsModalOpen(true);
+    }, []);
+
+    const handleSaveAsset = useCallback((updatedAsset) => {
+        updateAsset(updatedAsset);
+    }, [updateAsset]);
+
+    return (
+        <div className="flex-1 p-6 space-y-6 overflow-y-auto bg-gray-50/90 backdrop-blur-sm">
+            
+            {/* Search Header */}
+            <div className="sticky top-0 bg-white p-4 rounded-xl shadow-lg z-20">
+                <h3 className="text-2xl font-bold text-gray-800 flex items-center gap-2 mb-2"><Search size={24}/> Asset Search & Management</h3>
+                <input 
+                    type="text" 
+                    placeholder="Search by Asset Name, Model, or Serial Number..." 
+                    className="w-full border-2 border-gray-300 rounded-full py-3 px-6 text-lg focus:border-blue-500 focus:ring-blue-500 outline-none transition-all shadow-inner"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
+
+            {/* Asset List */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                {filteredAssets.map(asset => (
+                    <div key={asset.id} className="bg-white p-5 rounded-xl shadow-lg border border-gray-200 hover:shadow-xl transition-all flex flex-col justify-between">
+                        <div>
+                            <div className="flex items-center justify-between mb-3">
+                                <span className={`px-3 py-1 text-xs font-semibold rounded-full uppercase ${asset.type === 'robot' ? 'bg-red-100 text-red-600' : asset.type === 'conveyor' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>{asset.type}</span>
+                                <Info size={18} className="text-gray-400" />
+                            </div>
+                            <h4 className="text-xl font-bold text-gray-900 mb-1">{asset.name}</h4>
+                            <p className="text-sm text-gray-600">Model: {asset.model}</p>
+                            <p className="text-sm text-gray-600">Location: {asset.location}</p>
+                        </div>
+                        <button 
+                            onClick={() => handleOpenAssetCard(asset)}
+                            className="mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold"
+                        >
+                            <Eye size={16} /> View/Manage Details
+                        </button>
+                    </div>
+                ))}
+                {filteredAssets.length === 0 && (
+                    <div className="col-span-full p-20 text-center text-gray-500">
+                        <Search size={40} className="mx-auto mb-4"/>
+                        <p className="text-lg font-semibold">No assets match your search criteria.</p>
+                    </div>
+                )}
+            </div>
+
+            {/* Asset Details Modal */}
+            <AssetCardModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                asset={selectedAsset} 
+                onSave={handleSaveAsset} 
+                isDev={isDev}
+            />
+        </div>
+    );
+});
+
+const SettingsLayout = React.memo(({ settings, saveSettings, addUser, deleteUser, resetAllCharts, dbConnected, firebaseUser, handleGoogleSignIn, handleFirebaseSignOut, currentUser }) => {
+    const [tempSettings, setTempSettings] = useState(settings);
+    const [newUser, setNewUser] = useState({ username: '', password: '', role: 'user' });
+    const [isAddingUser, setIsAddingUser] = useState(false);
+    
+    useEffect(() => {
+        setTempSettings(settings);
+    }, [settings]);
+
+    const handleSave = () => {
+        saveSettings(tempSettings);
+        // Re-initialize Firebase if config changed
+        if (tempSettings.firebaseConfig) {
+            try {
+                const config = JSON.parse(tempSettings.firebaseConfig);
+                if (!getApps().length) {
+                    initializeApp(config);
+                    getAuth(app);
+                    getFirestore(app);
+                }
+            } catch (e) {
+                alert("Error parsing Firebase Config. Please check the JSON format.");
+            }
+        }
+        alert("Settings saved successfully!");
+    };
+    
+    const handleAddUser = () => {
+        if (!newUser.username || !newUser.password) return alert("Username and Password are required.");
+        addUser(newUser);
+        setNewUser({ username: '', password: '', role: 'user' });
+        setIsAddingUser(false);
+    };
+
+    const handleUpdateBuilding = (id, field, value) => {
+        setTempSettings(prev => ({
+            ...prev,
+            buildings: prev.buildings.map(b => b.id === id ? { ...b, [field]: value } : b)
+        }));
+    };
+    
+    return (
+        <div className="flex-1 p-8 space-y-8 overflow-y-auto bg-gray-50/90 backdrop-blur-sm">
+            <div className="max-w-4xl mx-auto space-y-8">
+                
+                {/* User Management */}
+                <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-purple-600">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4"><Users size={20} className="text-purple-600"/> User Management (Developer Only)</h3>
+                    
+                    <div className="grid grid-cols-1 gap-4">
+                        {tempSettings.users.map(user => (
+                            <div key={user.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                                <div>
+                                    <p className="font-semibold">{user.username} <span className="text-xs text-gray-500">({user.role})</span></p>
+                                </div>
+                                {user.role !== 'developer' && currentUser?.role === 'developer' && (
+                                    <button onClick={() => deleteUser(user.id)} className="text-red-500 hover:text-red-700 p-1 rounded"><UserMinus size={16} /></button>
+                                )}
+                                {user.role === 'developer' && <span className="text-xs text-gray-500">Fixed Account</span>}
+                            </div>
+                        ))}
+                    </div>
+
+                    {currentUser?.role === 'developer' && (
+                        <div className="mt-4 pt-4 border-t">
+                            <button onClick={() => setIsAddingUser(!isAddingUser)} className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                                {isAddingUser ? <Minus size={16}/> : <UserPlus size={16}/>} {isAddingUser ? 'Cancel' : 'Add New User'}
+                            </button>
+                            {isAddingUser && (
+                                <div className="mt-3 p-4 bg-blue-50 rounded-lg space-y-2">
+                                    <input type="text" placeholder="Username" className="w-full border rounded p-2 text-sm" value={newUser.username} onChange={(e) => setNewUser({...newUser, username: e.target.value})} />
+                                    <input type="password" placeholder="Password" className="w-full border rounded p-2 text-sm" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} />
+                                    <select className="w-full border rounded p-2 text-sm" value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value})}>
+                                        <option value="user">User (View Only)</option>
+                                        <option value="developer">Developer (Full Access)</option>
+                                    </select>
+                                    <button onClick={handleAddUser} className="w-full bg-blue-600 text-white py-2 rounded text-sm">Create User</button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Building Configuration */}
+                <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-yellow-600">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4"><Factory size={20} className="text-yellow-600"/> Building & Theme Management</h3>
+                    
+                    <div className="space-y-4">
+                        {tempSettings.buildings.map(building => (
+                            <div key={building.id} className="flex items-center gap-4 p-3 border rounded-lg bg-gray-50">
+                                <div className="w-6 h-6 rounded-full shadow" style={{ backgroundColor: building.color }}></div>
+                                <input 
+                                    type="text" 
+                                    className="flex-1 border rounded p-2 text-sm" 
+                                    value={building.name} 
+                                    onChange={(e) => handleUpdateBuilding(building.id, 'name', e.target.value)}
+                                />
+                                <input 
+                                    type="color" 
+                                    className="w-10 h-10 border-none p-0 rounded-md cursor-pointer" 
+                                    value={building.color} 
+                                    onChange={(e) => handleUpdateBuilding(building.id, 'color', e.target.value)}
+                                />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Database & API Configuration */}
+                <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-600">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4"><Database size={20} className="text-red-600"/> Data Source & API Setup</h3>
+                    
+                    {/* Firebase Connection */}
+                    <div className="mb-4 p-4 border rounded-lg bg-red-50">
+                        <p className="font-semibold flex items-center gap-2 mb-2">
+                            <Wifi size={16} className={dbConnected ? 'text-green-600' : 'text-red-600'} />
+                            Firebase Status: <span className={`font-bold ${dbConnected ? 'text-green-600' : 'text-red-600'}`}>{dbConnected ? 'CONNECTED' : 'OFFLINE'}</span>
+                        </p>
+                        {firebaseUser ? (
+                            <div className="flex justify-between items-center bg-white p-2 rounded border">
+                                <p className="text-sm">Signed in as: <span className="font-bold text-blue-600">{firebaseUser.email}</span></p>
+                                <button onClick={handleFirebaseSignOut} className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"><LogOut size={14}/> Sign Out</button>
+                            </div>
+                        ) : (
+                            <button onClick={handleGoogleSignIn} disabled={!dbConnected} className="w-full bg-blue-600 text-white py-2 rounded flex items-center justify-center gap-2 hover:bg-blue-700 disabled:opacity-50">
+                                <CloudLightning size={16}/> {dbConnected ? 'Link to Google Firebase' : 'Connect Firebase Config First'}
+                            </button>
+                        )}
+                    </div>
+                    
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Firebase Config JSON</label>
+                    <textarea 
+                        className="w-full border rounded p-2 text-sm font-mono h-24" 
+                        placeholder="Paste your Firebase Config JSON object here..." 
+                        value={tempSettings.firebaseConfig} 
+                        onChange={(e) => setTempSettings({...tempSettings, firebaseConfig: e.target.value})}
+                    ></textarea>
+
+                    <label className="block text-sm font-medium text-gray-700 mb-1 mt-4">Postman/Mock API Endpoint</label>
+                    <input 
+                        type="text" 
+                        className="w-full border rounded p-2 text-sm" 
+                        value={tempSettings.apiEndpoint} 
+                        onChange={(e) => setTempSettings({...tempSettings, apiEndpoint: e.target.value})}
+                    />
+                </div>
+                
+                {/* Maintenance & Reset */}
+                <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-gray-400 space-y-4">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Settings2 size={20} className="text-gray-600"/> Maintenance</h3>
+                    <button onClick={resetAllCharts} className="flex items-center gap-2 bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">
+                        <RefreshCw size={16}/> Reset All Dashboard Charts to Default
+                    </button>
+                </div>
+                
+                {/* Save Button */}
+                <div className="flex justify-end">
+                    <button onClick={handleSave} className="px-6 py-3 bg-green-600 text-white rounded-xl shadow-lg hover:bg-green-700 font-bold transition-transform transform hover:scale-[1.02]">
+                        <Save size={20} className="inline mr-2"/> Save All Settings
+                    </button>
+                </div>
+                
+            </div>
+        </div>
+    );
+});
+
+
+// --- MAIN APP COMPONENT ---
+
 export default function IndustrialApp() {
-  // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null); // { username, role }
+  const [currentUser, setCurrentUser] = useState(null);
   const [loginError, setLoginError] = useState('');
   
-  // Users Database (Simulated persistence)
-  const [userList, setUserList] = useState([
-    { id: 1, username: 'dev', password: 'admin', role: 'developer' },
-    { id: 2, username: 'operator', password: '1234', role: 'user' },
-  ]);
-
-  // --- App State ---
-  const [activeTab, setActiveTab] = useState('dashboard'); 
-  const [activeBuildingId, setActiveBuildingId] = useState(1);
-  const [firebaseConfigStr, setFirebaseConfigStr] = useState('');
-  const [dbConnected, setDbConnected] = useState(false);
-  const [buildings, setBuildings] = useState([
-    { id: 1, name: "Wellford", color: "blue", theme: "from-blue-600 to-blue-400", text: "text-blue-600", bg: "bg-blue-50" },
-    { id: 2, name: "The Power Center (TPC)", color: "emerald", theme: "from-emerald-600 to-emerald-400", text: "text-emerald-600", bg: "bg-emerald-50" },
-    { id: 3, name: "EDC", color: "violet", theme: "from-violet-600 to-violet-400", text: "text-violet-600", bg: "bg-violet-50" },
-    { id: 4, name: "Prime Robots", color: "orange", theme: "from-orange-600 to-orange-400", text: "text-orange-600", bg: "bg-orange-50" },
-  ]);
-  const [workOrderData, setWorkOrderData] = useState(generateWorkOrderData());
-  const [downtimeData, setDowntimeData] = useState(generateDowntimeData());
-  const [errorTypeData, setErrorTypeData] = useState(generateErrorTypeData());
-  const [gaugeData, setGaugeData] = useState({ raft: 98, conveyor: 95, autostore: 99, quicktron: 92 });
-  const [robotList, setRobotList] = useState(generateRobotList());
-  const [robotStatus, setRobotStatus] = useState({});
-  const [selectedRobot, setSelectedRobot] = useState(null);
-  const [isRobotModalOpen, setIsRobotModalOpen] = useState(false);
-  const [alerts, setAlerts] = useState(MOCK_ALERTS);
-  const [layoutItems, setLayoutItems] = useState([{ id: 1, type: 'motor', x: 100, y: 100, rotation: 0, data: { name: 'Main Drive', status: 'stopped' } }]);
-  const [selectedItemId, setSelectedItemId] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [unsavedChanges, setUnsavedChanges] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState(null);
+  const { settings, saveSettings, addUser, deleteUser } = useSettingsManager();
+  const { assets, updateAsset, getAssetById } = useAssetManager();
   
-  // User Management State
-  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'user' });
+  const [activeTab, setActiveTab] = useState('dashboard'); 
+  const [activeBuildingId, setActiveBuildingId] = useState(settings.buildings[0].id);
+  const [isEditMode, setIsEditMode] = useState(false);
 
-  const currentTheme = buildings.find(b => b.id === activeBuildingId) || buildings[0];
+  // --- Firebase/Auth State ---
+  const [dbConnected, setDbConnected] = useState(false);
+  const [firebaseUser, setFirebaseUser] = useState(null);
 
-  // --- Auth Logic ---
-  const handleLogin = (u, p) => {
-    const user = userList.find(user => user.username === u && user.password === p);
-    if (user) {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      setLoginError('');
-    } else {
-      setLoginError('Invalid credentials. Try dev/admin');
+  // Initialize Firebase when settings loaded
+  useEffect(() => {
+    const configStr = settings.firebaseConfig;
+    if (configStr) {
+      try {
+        const config = JSON.parse(configStr);
+        if (!getApps().length) {
+          app = initializeApp(config);
+          auth = getAuth(app);
+          db = getFirestore(app);
+          setDbConnected(true);
+        } else {
+          app = getApp();
+          auth = getAuth(app);
+          db = getFirestore(app);
+          setDbConnected(true);
+        }
+
+        // Set up Auth State Listener
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          setFirebaseUser(user);
+        });
+        return () => unsubscribe();
+
+      } catch (e) {
+        console.error("Failed to initialize Firebase:", e);
+        setDbConnected(false);
+      }
     }
+  }, [settings.firebaseConfig]);
+
+  // Handle Firebase Login/Logout
+  const handleGoogleSignIn = async () => {
+    if (!dbConnected) {
+      alert("Please ensure Firebase configuration is valid and saved before connecting."); 
+      return;
+    }
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Google Sign-In Failed:", error);
+      alert(`Sign-in failed: ${error.message}`);
+    }
+  };
+
+  const handleFirebaseSignOut = async () => {
+    if (auth) {
+      await signOut(auth);
+      setFirebaseUser(null);
+    }
+  };
+
+  // --- Auth Handlers ---
+  const handleLogin = (u, p) => {
+    const user = settings.users.find(user => user.username === u && user.password === p);
+    if (user) { setCurrentUser(user); setIsAuthenticated(true); setLoginError(''); } 
+    else setLoginError('Invalid credentials.');
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setCurrentUser(null);
-    setActiveTab('dashboard');
+    setIsEditMode(false);
+  };
+  
+  const toggleEditMode = () => {
+      if (currentUser?.role === 'developer') {
+          setIsEditMode(prev => !prev);
+      }
   };
 
-  const handleAddUser = () => {
-    if (!newUser.username || !newUser.password) return;
-    const u = { id: Date.now(), ...newUser };
-    const updatedList = [...userList, u];
-    setUserList(updatedList);
-    setNewUser({ username: '', password: '', role: 'user' });
-    // Sync with DB if connected
-    if (dbConnected && db) {
-      setDoc(doc(db, 'artifacts', 'tti-auto', 'private', 'users'), { list: updatedList });
-    }
-  };
+  // --- Building & Dashboard Hooks ---
+  const activeBuilding = settings.buildings.find(b => b.id === activeBuildingId) || settings.buildings[0];
+  const { activeCharts, dashboardData, themeColor, updateChartConfig, deleteChartConfig, resetAllCharts } = useDashboardData(settings.buildings, activeBuildingId);
 
-  const handleDeleteUser = (id) => {
-    const updatedList = userList.filter(u => u.id !== id);
-    setUserList(updatedList);
-    if (dbConnected && db) {
-      setDoc(doc(db, 'artifacts', 'tti-auto', 'private', 'users'), { list: updatedList });
-    }
-  };
+  
+  // --- UI RENDERING ---
+  
+  // If not authenticated, show the login screen
+  if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={loginError} />;
 
-  // --- Standard Logic ---
-  useEffect(() => {
-    const savedConfig = localStorage.getItem('tti_firebase_config');
-    if (savedConfig) {
-      setFirebaseConfigStr(savedConfig);
-      tryConnectFirebase(savedConfig);
-    }
-  }, []);
-
-  const tryConnectFirebase = async (configStr) => {
-    try {
-      const config = JSON.parse(configStr);
-      if (!getApps().length) app = initializeApp(config); else app = getApp();
-      auth = getAuth(app);
-      db = getFirestore(app);
-      await signInAnonymously(auth);
-      setDbConnected(true);
-      // Load layout
-      onSnapshot(doc(db, 'artifacts', 'tti-auto', 'public', 'data', 'layout'), (snap) => {
-        if(snap.exists() && !unsavedChanges) setLayoutItems(snap.data().items);
-      });
-      // Load users (Private)
-      onSnapshot(doc(db, 'artifacts', 'tti-auto', 'private', 'users'), (snap) => {
-        if(snap.exists()) setUserList(snap.data().list);
-      });
-    } catch (error) { console.error("DB Error", error); setDbConnected(false); }
-  };
-
-  const handleSaveConfig = () => {
-    try {
-      JSON.parse(firebaseConfigStr);
-      localStorage.setItem('tti_firebase_config', firebaseConfigStr);
-      tryConnectFirebase(firebaseConfigStr);
-      alert("Saved.");
-    } catch (e) { alert("Invalid JSON"); }
-  };
-
-  const handleClearConfig = () => {
-    localStorage.removeItem('tti_firebase_config');
-    setFirebaseConfigStr('');
-    setDbConnected(false);
-    alert("Firebase config cleared.");
-  };
-
-  // Mock Data Loop
-  useEffect(() => {
-    const initialRobotData = {};
-    robotList.forEach(id => initialRobotData[id] = Math.floor(Math.random() * 15) + 85);
-    setRobotStatus(initialRobotData);
-    const interval = setInterval(() => {
-      setGaugeData(prev => ({
-        raft: Math.min(100, Math.max(0, prev.raft + (Math.random() - 0.5) * 2)),
-        conveyor: Math.min(100, Math.max(0, prev.conveyor + (Math.random() - 0.5) * 3)),
-        autostore: Math.min(100, Math.max(0, prev.autostore + (Math.random() - 0.5) * 1)),
-        quicktron: Math.min(100, Math.max(0, prev.quicktron + (Math.random() - 0.5) * 4)),
-      }));
-      setRobotStatus(prev => {
-        const next = { ...prev };
-        const randomId = robotList[Math.floor(Math.random() * robotList.length)];
-        next[randomId] = Math.min(100, Math.max(40, next[randomId] + (Math.random() - 0.5) * 10));
-        return next;
-      });
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const saveLayoutToDatabase = async () => {
-    if (dbConnected && db) {
-       await setDoc(doc(db, 'artifacts', 'tti-auto', 'public', 'data', 'layout'), { items: layoutItems });
-       setUnsavedChanges(false);
-       alert("Layout synced to Cloud.");
-    } else {
-       setUnsavedChanges(false);
-       alert("Saved Locally.");
-    }
-  };
-
-  // Canvas Handlers
-  const addItem = (type) => {
-    if (currentUser?.role !== 'developer') return;
-    const newItem = { id: Date.now(), type, x: 300, y: 300, rotation: 0, data: { name: type, model: '-', serial: '-', status: 'stopped' }};
-    setLayoutItems([...layoutItems, newItem]);
-    setSelectedItemId(newItem.id);
-    setUnsavedChanges(true);
-  };
-  const handleToggleRun = (id) => {
-    setLayoutItems(prev => prev.map(item => item.id === id ? { ...item, data: { ...item.data, status: item.data.status === 'running' ? 'stopped' : 'running' } } : item));
-    setUnsavedChanges(true);
-  };
-  const handleMouseDown = (e, id) => { if (currentUser?.role === 'developer') { e.stopPropagation(); setSelectedItemId(id); setIsDragging(true); const i = layoutItems.find(x=>x.id===id); setDragOffset({x: e.clientX-i.x, y:e.clientY-i.y}); }};
-  const handleCanvasMouseMove = (e) => { if (isDragging && selectedItemId && currentUser?.role === 'developer') { const nx = e.clientX-dragOffset.x; const ny = e.clientY-dragOffset.y; setLayoutItems(prev => prev.map(i => i.id===selectedItemId ? {...i, x:nx, y:ny} : i)); setUnsavedChanges(true); }};
-  const handleCanvasMouseUp = () => setIsDragging(false);
-  const handleRotate = (id) => { if(currentUser?.role === 'developer') { setLayoutItems(prev => prev.map(i => i.id===id ? {...i, rotation:(i.rotation+90)%360} : i)); setUnsavedChanges(true); }};
-  const handleDelete = (id) => { if(currentUser?.role === 'developer') { setLayoutItems(prev => prev.filter(i => i.id!==id)); setSelectedItemId(null); setUnsavedChanges(true); }};
-  const handleInfoClick = (item) => { setEditingItem({...item}); setIsModalOpen(true); };
-  const saveItemDetails = () => { setLayoutItems(prev => prev.map(i => i.id===editingItem.id ? editingItem : i)); setIsModalOpen(false); setUnsavedChanges(true); };
-
-  // --- RENDER CHECK ---
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} />;
-  }
-
-  const renderWellfordDashboard = () => (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2 h-[300px]">
-           <h3 className="text-lg font-semibold mb-4 text-gray-700 flex items-center gap-2"><Activity size={18} className="text-red-500"/> Downtime Hours (Daily)</h3>
-           <div className="w-full h-[200px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={downtimeData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="hour" stroke="#94a3b8" fontSize={12}/><YAxis stroke="#94a3b8" fontSize={12}/><RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '8px'}}/><Bar dataKey="minutes" fill="#ef4444" radius={[4,4,0,0]} name="Minutes Down"/></BarChart></ResponsiveContainer></div>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 grid grid-cols-2 gap-4 place-items-center h-[300px] overflow-y-auto">
-           <div className="col-span-2 w-full text-left font-semibold text-gray-700 mb-2 border-b pb-2">System Uptime</div>
-           <RadialGauge value={Math.round(gaugeData.raft)} label="Raft" color="#3b82f6" size={100} />
-           <RadialGauge value={Math.round(gaugeData.conveyor)} label="Conveyor" color="#10b981" size={100} />
-           <div className="col-span-2 pt-2"><RadialGauge value={Math.round(gaugeData.autostore)} label="AutoStore" color="#8b5cf6" size={100} /></div>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2 h-[350px]">
-            <h3 className="text-lg font-semibold mb-4 text-gray-700 flex items-center gap-2"><CheckCircle size={18} className="text-blue-500"/> Work Orders Completed</h3>
-            <div className="w-full h-[250px]"><ResponsiveContainer width="100%" height="100%"><LineChart data={workOrderData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="name" stroke="#94a3b8"/><YAxis stroke="#94a3b8"/><RechartsTooltip contentStyle={{borderRadius: '8px'}}/><Line type="monotone" dataKey="completed" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} activeDot={{r:6}}/></LineChart></ResponsiveContainer></div>
-         </div>
-         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[350px]">
-            <h3 className="text-lg font-semibold mb-4 text-gray-700">Errors by Type</h3>
-            <div className="w-full h-[250px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={errorTypeData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">{errorTypeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}</Pie><RechartsTooltip /></PieChart></ResponsiveContainer></div>
-         </div>
-      </div>
-    </div>
-  );
-
-  const renderStandardBuilding = (gaugeType, gaugeLabel, gaugeColor) => (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 lg:col-span-2 h-[300px]">
-           <h3 className="text-lg font-semibold mb-4 text-gray-700 flex items-center gap-2"><Activity size={18} className="text-red-500"/> Downtime Hours (Daily)</h3>
-           <div className="w-full h-[200px]"><ResponsiveContainer width="100%" height="100%"><BarChart data={downtimeData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="hour" stroke="#94a3b8" fontSize={12}/><YAxis stroke="#94a3b8" fontSize={12}/><RechartsTooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '8px'}}/><Bar dataKey="minutes" fill="#ef4444" radius={[4,4,0,0]} name="Minutes Down"/></BarChart></ResponsiveContainer></div>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center h-[300px]">
-           <div className="w-full text-left font-semibold text-gray-700 mb-4 border-b pb-2">Primary System Uptime</div>
-           <RadialGauge value={Math.round(gaugeData[gaugeType])} label={gaugeLabel} color={gaugeColor} size={160} />
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderPrimeRobots = () => (
-    <div className="space-y-6">
-      <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-        <h3 className="text-xl font-bold mb-6 text-gray-800 flex items-center justify-between">
-          <span>Robot Fleet Status (45 Units)</span>
-          <div className="flex gap-4 text-sm"><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-green-500"></div>Optimal</div><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-yellow-500"></div>Warning</div><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500"></div>Critical</div></div>
-        </h3>
-        <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-9 gap-6">
-          {robotList.map(id => {
-            const val = Math.round(robotStatus[id] || 0);
-            let color = '#10b981'; if (val < 90) color = '#f59e0b'; if (val < 70) color = '#ef4444';
-            return <div key={id} className="flex justify-center"><RadialGauge value={val} label={`Robot ${id}`} color={color} size={90} subLabel={val < 90 ? "ERR" : "OK"} onClick={() => setSelectedRobot(id) || setIsRobotModalOpen(true)} /></div>;
-          })}
-        </div>
-      </div>
-    </div>
-  );
-
+  // Main App Content (After Login)
   return (
-    <div className="flex h-screen w-full bg-gray-50 text-gray-800 overflow-hidden font-sans">
-      <aside className="w-20 flex flex-col items-center py-6 bg-white border-r border-gray-200 z-20 shadow-sm">
-        <div className={`mb-8 p-2 rounded-lg bg-gradient-to-br ${currentTheme.theme} shadow-lg`}>
-          <Factory className="text-white" size={28} />
-        </div>
+    <div className="flex h-screen w-full text-gray-800 overflow-hidden font-sans" style={{ backgroundColor: '#f1f5f9' }}>
+      
+      {/* Global Background (Placeholder for the entire dashboard area) */}
+      <div className="absolute inset-0 z-0" style={{ background: 'linear-gradient(135deg, #f0f0f0 0%, #e2e8f0 100%)' }}></div>
+
+      {/* Sidebar */}
+      <aside className="w-20 flex flex-col items-center py-6 bg-white border-r border-gray-200 z-20 shadow-xl relative">
+        <div className="mb-8 p-2 rounded-lg bg-blue-600 shadow-lg"><Factory className="text-white" size={28} /></div>
         <nav className="flex flex-col gap-6 w-full">
-          <button onClick={() => setActiveTab('dashboard')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'dashboard' ? `bg-gray-100 ${currentTheme.text}` : 'text-gray-400 hover:text-gray-600'}`}><Activity size={24} /></button>
-          <button onClick={() => setActiveTab('layout')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'layout' ? `bg-gray-100 ${currentTheme.text}` : 'text-gray-400 hover:text-gray-600'}`}><Layout size={24} /></button>
-          <button onClick={() => setActiveTab('settings')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'settings' ? `bg-gray-100 ${currentTheme.text}` : 'text-gray-400 hover:text-gray-600'}`}><Settings size={24} /></button>
+          {/* Main Tabs */}
+          <button onClick={() => setActiveTab('dashboard')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-gray-100 text-blue-600 shadow-md' : 'text-gray-500 hover:bg-gray-50'}`} title="Dashboard"><Activity size={24} /></button>
+          <button onClick={() => setActiveTab('assetManager')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'assetManager' ? 'bg-gray-100 text-blue-600 shadow-md' : 'text-gray-500 hover:bg-gray-50'}`} title="Asset Management"><Layout size={24} /></button>
+          {currentUser?.role === 'developer' && (
+              <button onClick={() => setActiveTab('settings')} className={`p-3 mx-auto rounded-xl transition-all ${activeTab === 'settings' ? 'bg-gray-100 text-blue-600 shadow-md' : 'text-gray-500 hover:bg-gray-50'}`} title="Settings"><Settings size={24} /></button>
+          )}
         </nav>
+        
         <div className="mt-auto flex flex-col items-center gap-4 mb-4">
-           {dbConnected ? <Database className="text-green-500 animate-pulse" size={16} /> : <Wifi className="text-gray-300" size={16} />}
+           {/* Logout Button */}
+           <button onClick={handleLogout} className="p-3 mx-auto rounded-xl text-red-500 hover:bg-red-50/50 transition-colors" title="Logout"><LogOut size={24} /></button>
+           {/* User Indicator */}
            <div className={`w-8 h-8 rounded-full border-2 border-white shadow-sm flex items-center justify-center text-xs font-bold text-white ${currentUser?.role === 'developer' ? 'bg-purple-600' : 'bg-blue-500'}`}>{currentUser?.username.substring(0,2).toUpperCase()}</div>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className={`h-16 border-b border-gray-200 flex items-center justify-between px-8 bg-white z-10 transition-colors duration-500`}>
+      {/* Main Content Area */}
+      <main className="flex-1 flex flex-col overflow-hidden relative z-10">
+        <header className="h-16 border-b border-gray-200 bg-white/95 backdrop-blur flex items-center justify-between px-8 shadow-sm z-30 sticky top-0">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">{activeTab === 'dashboard' ? 'Operations Dashboard' : activeTab === 'layout' ? 'System Layout' : 'Configuration'}</h1>
-            <p className={`text-xs font-medium ${currentTheme.text}`}>Logged in as: <span className="font-bold uppercase">{currentUser?.username}</span> ({currentUser?.role})</p>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+                {activeTab === 'dashboard' ? activeBuilding.name : 
+                 activeTab === 'assetManager' ? 'Asset Management' : 'Configuration'}
+            </h1>
+            <p className="text-xs font-medium text-gray-500">
+                {activeTab === 'dashboard' ? 'Real-Time Operational Metrics' : 
+                 activeTab === 'assetManager' ? 'Inventory Search & Maintenance' : 'System Administration'}
+            </p>
           </div>
+          
+          {/* Building Selector (Only on Dashboard Tab) */}
           {activeTab === 'dashboard' && (
-            <div className="flex bg-gray-100 rounded-lg p-1 gap-1 overflow-x-auto max-w-[60vw]">
-              {buildings.map(b => (
-                <button key={b.id} onClick={() => setActiveBuildingId(b.id)} className={`px-4 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-all ${activeBuildingId === b.id ? 'bg-white text-gray-900 shadow-sm ring-1 ring-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>{b.name}</button>
+            <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+              {settings.buildings.map(building => (
+                <button 
+                  key={building.id} 
+                  onClick={() => setActiveBuildingId(building.id)} 
+                  className={`px-3 py-1 text-sm rounded-lg font-semibold transition-all flex items-center gap-2 ${
+                    activeBuildingId === building.id 
+                      ? 'bg-white text-gray-900 shadow-md ring-2 ring-inset' 
+                      : 'text-gray-600 hover:bg-white/50'
+                  }`}
+                  style={activeBuildingId === building.id ? { borderColor: building.color, ringColor: building.color } : {}}
+                >
+                  <Circle size={10} style={{ fill: building.color, color: building.color }} />
+                  {building.name}
+                </button>
               ))}
             </div>
           )}
-          {activeTab === 'layout' && currentUser?.role === 'developer' && (
-             <button onClick={saveLayoutToDatabase} className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow text-white bg-gradient-to-r ${currentTheme.theme} hover:opacity-90 transition-opacity ${unsavedChanges ? 'animate-pulse' : ''}`}><Save size={16} /> {unsavedChanges ? 'Save Changes' : 'Layout Saved'}</button>
-          )}
         </header>
 
-        {activeTab === 'dashboard' && (
-          <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 flex gap-6">
-            <div className="flex-1">
-              {activeBuildingId === 1 && renderWellfordDashboard()}
-              {activeBuildingId === 2 && renderStandardBuilding('conveyor', 'Conveyor System', '#10b981')}
-              {activeBuildingId === 3 && renderStandardBuilding('quicktron', 'Quicktron AGV', '#8b5cf6')}
-              {activeBuildingId === 4 && renderPrimeRobots()}
-            </div>
-            <div className="w-80 bg-white border-l border-gray-200 p-4 hidden xl:block overflow-y-auto">
-               <div className="flex items-center gap-2 mb-4 text-gray-800 font-bold"><Bell size={20} /> Live Alerts</div>
-               <div className="space-y-3">{alerts.map(alert => (
-                   <div key={alert.id} className={`p-3 rounded-lg border-l-4 ${alert.type === 'critical' ? 'bg-red-50 border-red-500' : alert.type === 'warning' ? 'bg-amber-50 border-amber-500' : 'bg-blue-50 border-blue-500'} animate-in slide-in-from-right duration-300`}><div className="flex justify-between items-start"><span className={`text-xs font-bold uppercase ${alert.type === 'critical' ? 'text-red-700' : alert.type === 'warning' ? 'text-amber-700' : 'text-blue-700'}`}>{alert.type}</span><span className="text-[10px] text-gray-400">{alert.time}</span></div><p className="text-sm font-medium text-gray-800 mt-1">{alert.msg}</p></div>
-                 ))}
-               </div>
-            </div>
-          </div>
-        )}
+        {/* --- DYNAMIC CONTENT --- */}
+        <div className="flex-1 overflow-y-auto relative" style={{ '--theme-color': activeBuilding.color }}>
 
-        {activeTab === 'layout' && (
-          <div className="flex-1 flex relative overflow-hidden bg-white" onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} onMouseLeave={handleCanvasMouseUp}>
-            {currentUser?.role !== 'developer' && (
-              <div className="absolute top-4 left-4 z-50 bg-white/90 backdrop-blur border border-gray-200 p-3 rounded-lg shadow-lg flex items-center gap-3"><Lock size={18} className="text-gray-500" /><div className="text-xs text-gray-600"><strong>View Only</strong><br/>Developer access required to edit.</div></div>
-            )}
-            {currentUser?.role === 'developer' && (
-              <div className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col gap-4 z-10 shadow-xl">
-                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Toolbox</h3>
-                {['conveyor-straight', 'conveyor-curve', 'junction', 'motor', 'sensor'].map(type => (<button key={type} onClick={() => addItem(type)} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-white hover:shadow-md border border-gray-100 hover:border-blue-200 transition-all group text-left"><span className="text-sm font-medium text-gray-600 group-hover:text-blue-600 capitalize">{type.replace('-', ' ')}</span></button>))}
-              </div>
-            )}
-            <div className="flex-1 relative overflow-hidden bg-gray-50" style={{backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px'}} onClick={() => setSelectedItemId(null)}>
-              {layoutItems.map(item => <HmiComponent key={item.id} item={item} isSelected={selectedItemId === item.id} isEditable={currentUser?.role === 'developer'} onMouseDown={handleMouseDown} onRotate={handleRotate} onDelete={handleDelete} onInfo={handleInfoClick} onToggleRun={handleToggleRun} />)}
-            </div>
-          </div>
-        )}
+          {/* Dashboard View */}
+          {activeTab === 'dashboard' && (
+             <DashboardLayout 
+                activeBuilding={activeBuilding} 
+                activeCharts={activeCharts} 
+                dashboardData={dashboardData} 
+                themeColor={activeBuilding.color} 
+                isEditable={isEditMode}
+                toggleEditMode={toggleEditMode}
+                updateChartConfig={updateChartConfig}
+                deleteChartConfig={deleteChartConfig}
+                resetAllCharts={resetAllCharts}
+                currentUser={currentUser}
+             />
+          )}
 
-        {activeTab === 'settings' && (
-          <div className="flex-1 overflow-y-auto p-10 bg-gray-50">
-             <div className="max-w-4xl mx-auto space-y-8">
-               
-               {/* User Profile / Logout */}
-               <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
-                 <div className="flex items-center gap-4">
-                   <div className="h-12 w-12 rounded-full bg-gray-900 flex items-center justify-center text-white font-bold text-xl">{currentUser.username.substring(0,1).toUpperCase()}</div>
-                   <div><h2 className="text-xl font-bold text-gray-900">Hi, {currentUser.username}</h2><p className="text-sm text-gray-500 capitalize">Role: {currentUser.role}</p></div>
-                 </div>
-                 <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-red-100"><LogOut size={18}/> Sign Out</button>
-               </div>
+          {/* Asset Manager View (New) */}
+          {activeTab === 'assetManager' && (
+             <AssetManagerLayout 
+                assets={assets} 
+                updateAsset={updateAsset} 
+                isDev={currentUser?.role === 'developer'} 
+             />
+          )}
 
-               {/* User Management (Developer Only) */}
-               {currentUser.role === 'developer' && (
-                 <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 animate-in slide-in-from-bottom-4 duration-500">
-                   <div className="flex items-center gap-3 mb-6 text-purple-700"><Users size={24} /><h2 className="text-xl font-bold text-gray-900">User Management</h2></div>
-                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                     <div className="md:col-span-1 bg-gray-50 p-4 rounded-xl border border-gray-200">
-                       <h3 className="text-sm font-bold text-gray-700 mb-4 uppercase">Create New User</h3>
-                       <div className="space-y-3">
-                         <input type="text" placeholder="Username" className="w-full border p-2 rounded text-sm" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} />
-                         <input type="text" placeholder="Password" className="w-full border p-2 rounded text-sm" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
-                         <select className="w-full border p-2 rounded text-sm" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
-                           <option value="user">Operator (Read Only)</option>
-                           <option value="developer">Developer (Admin)</option>
-                         </select>
-                         <button onClick={handleAddUser} className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700 flex justify-center items-center gap-2 text-sm font-bold"><UserPlus size={16} /> Add User</button>
-                       </div>
-                     </div>
-                     <div className="md:col-span-2">
-                       <h3 className="text-sm font-bold text-gray-700 mb-4 uppercase">Active Accounts</h3>
-                       <div className="space-y-2">
-                         {userList.map(u => (
-                           <div key={u.id} className="flex items-center justify-between p-3 bg-white border border-gray-100 rounded shadow-sm">
-                             <div className="flex items-center gap-3">
-                               <div className={`w-2 h-2 rounded-full ${u.role === 'developer' ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
-                               <div><div className="font-bold text-sm text-gray-800">{u.username}</div><div className="text-xs text-gray-400 capitalize">{u.role}</div></div>
-                             </div>
-                             {u.username !== 'dev' && <button onClick={() => handleDeleteUser(u.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>}
-                           </div>
-                         ))}
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-               )}
-
-               {/* Database Configuration (Developer Only) */}
-               {currentUser.role === 'developer' && (
-                 <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-200 transition-all">
-                   <div className="flex items-center gap-3 mb-6"><div className={`p-2 rounded-lg ${dbConnected ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}><Database size={24} /></div><div><h2 className="text-xl font-bold text-gray-900">Cloud Database</h2><p className="text-sm text-gray-500">Sync users and layouts to Firebase.</p></div></div>
-                   <div className="space-y-4">
-                     <div><label className="block text-xs font-bold text-gray-500 uppercase mb-2">Firebase Config JSON</label><textarea className="w-full h-24 font-mono text-xs border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none resize-y" value={firebaseConfigStr} onChange={(e) => setFirebaseConfigStr(e.target.value)} /></div>
-                     <div className="flex justify-between items-center pt-2"><div className="flex items-center gap-2 text-sm"><div className={`w-2 h-2 rounded-full ${dbConnected ? 'bg-green-500' : 'bg-gray-300'}`}></div><span className={dbConnected ? 'text-green-600 font-medium' : 'text-gray-500'}>{dbConnected ? 'Connected to Cloud' : 'Offline / Not Configured'}</span></div><div className="flex gap-3"><button onClick={handleClearConfig} className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"><LogOut size={16}/> Disconnect</button><button onClick={handleSaveConfig} className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-md transition-all active:scale-95"><RefreshCw size={16} /> Save & Connect</button></div></div>
-                   </div>
-                 </div>
-               )}
-             </div>
-          </div>
-        )}
+          {/* Settings View */}
+          {activeTab === 'settings' && currentUser?.role === 'developer' && (
+            <SettingsLayout 
+                settings={settings} 
+                saveSettings={saveSettings} 
+                addUser={addUser} 
+                deleteUser={deleteUser} 
+                resetAllCharts={resetAllCharts}
+                dbConnected={dbConnected}
+                firebaseUser={firebaseUser}
+                handleGoogleSignIn={handleGoogleSignIn}
+                handleFirebaseSignOut={handleFirebaseSignOut}
+                currentUser={currentUser}
+            />
+          )}
+        </div>
       </main>
-
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Component Details">
-        {editingItem && (
-          <div className="flex flex-col gap-4">
-            <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Name</label><input type="text" disabled={currentUser?.role !== 'developer'} className="w-full border border-gray-300 rounded p-2 text-gray-800 focus:border-blue-500 outline-none disabled:bg-gray-100" value={editingItem.data.name} onChange={(e) => setEditingItem({...editingItem, data: {...editingItem.data, name: e.target.value}})}/></div>
-            <div className="pt-4 flex justify-end gap-3"><button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-500">Close</button>{currentUser?.role === 'developer' && (<button onClick={saveItemDetails} className="px-4 py-2 bg-blue-600 text-white rounded font-medium shadow">Save</button>)}</div>
-          </div>
-        )}
-      </Modal>
-
-      <Modal isOpen={isRobotModalOpen} onClose={() => setIsRobotModalOpen(false)} title={`Robot ${selectedRobot} Diagnostics`}>
-         <div className="space-y-4">
-           <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-100"><div className="flex items-center gap-3"><div className="p-2 bg-white rounded-full shadow-sm"><AlertTriangle className="text-red-500" size={24} /></div><div><div className="text-sm font-bold text-red-800">Current Status: Faulted</div><div className="text-xs text-red-600">Uptime: {robotStatus[selectedRobot]}%</div></div></div><button className="text-xs bg-white border border-red-200 text-red-600 px-3 py-1 rounded hover:bg-red-100">Reset Robot</button></div>
-           <div><h4 className="text-sm font-bold text-gray-700 mb-2 uppercase tracking-wide">Recent Error Logs</h4><div className="border border-gray-200 rounded-lg overflow-hidden"><table className="w-full text-sm text-left"><thead className="bg-gray-50 text-gray-500 font-medium"><tr><th className="p-3 border-b">Time</th><th className="p-3 border-b">Code</th><th className="p-3 border-b">Description</th></tr></thead><tbody className="divide-y divide-gray-100">{MOCK_ROBOT_ERRORS.map((err, idx) => (<tr key={idx} className="hover:bg-gray-50"><td className="p-3 text-gray-500 font-mono">{err.time}</td><td className="p-3 font-bold text-gray-700">{err.code}</td><td className="p-3 text-gray-600">{err.desc}</td></tr>))}</tbody></table></div></div>
-         </div>
-      </Modal>
     </div>
   );
 }
